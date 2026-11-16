@@ -1178,9 +1178,9 @@ button, input, select { -webkit-tap-highlight-color: transparent; }
 /* Samsung QR: show the entire PNG within the white frame, without cropping. */
 #qrGenerator { overflow: visible !important; display: flex !important; align-items: center !important; justify-content: center !important; }
 #qrGenerator img { width: 130px !important; height: 130px !important; max-width: 100% !important; max-height: 100% !important; object-fit: contain !important; flex-shrink: 0 !important; }
-/* Edge-to-edge QR graphic: remove container padding and fit image to the square. */
-#qrGenerator { width:160px !important; height:160px !important; padding:0 !important; box-sizing:border-box !important; overflow:hidden !important; background:#fff !important; }
-#qrGenerator img { display:block !important; width:160px !important; height:160px !important; max-width:none !important; max-height:none !important; object-fit:fill !important; image-rendering:pixelated !important; }
+/* Small even white QR border, preserving the complete square code. */
+#qrGenerator { width:160px !important; height:160px !important; padding:8px !important; box-sizing:border-box !important; overflow:hidden !important; background:#fff !important; }
+#qrGenerator img { display:block !important; width:100% !important; height:100% !important; max-width:100% !important; max-height:100% !important; object-fit:contain !important; image-rendering:pixelated !important; }
 </style>
 </head>
 <body>
@@ -1413,56 +1413,81 @@ function positionPixelPatch() {
   pixelPatch.style.top = pixelY + 'px';
 }
 
-// Sample the actual portrait image at low resolution, not a fixed colour palette.
-// Only 63 pixels are read, keeping this lightweight on Samsung devices.
+// Lightweight compositing: white ID card + security lines + transparent portrait.
+// Cache the SVG security lines as an image so Samsung does not need a DOM screenshot.
 const censorPortrait = document.querySelector('.identity .portrait');
-const portraitSample = document.createElement('canvas');
-portraitSample.width = 7;
-portraitSample.height = 9;
-const portraitSampleCtx = portraitSample.getContext('2d', { willReadFrequently: true });
+const securitySvg = identityCard.querySelector('svg.lines');
+const censorSample = document.createElement('canvas');
+censorSample.width = 7;
+censorSample.height = 9;
+const censorCtx = censorSample.getContext('2d', {willReadFrequently:true});
+let cachedLines = null;
+let linesCachePending = false;
+function cacheSecurityLines() {
+  if (linesCachePending || !securitySvg) return;
+  linesCachePending = true;
+  try {
+    const clone = securitySvg.cloneNode(true);
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    clone.setAttribute('width', '420');
+    clone.setAttribute('height', '760');
+    // SVG CSS animations do not serialize; capture a static view of all the actual paths.
+    const groups = clone.querySelectorAll('g');
+    groups.forEach(g => g.removeAttribute('class'));
+    const blob = new Blob([new XMLSerializer().serializeToString(clone)], {type:'image/svg+xml'});
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => { cachedLines = img; URL.revokeObjectURL(url); linesCachePending = false; };
+    img.onerror = () => { URL.revokeObjectURL(url); linesCachePending = false; };
+    img.src = url;
+  } catch (_) { linesCachePending = false; }
+}
+requestAnimationFrame(cacheSecurityLines);
 
 function drawPixelation() {
   pixelCtx.clearRect(0, 0, PATCH_W, PATCH_H);
-  pixelCtx.globalAlpha = lensOpacity;
-
+  const cardW = identityCard.clientWidth;
+  const cardH = identityCard.clientHeight;
+  const tileW = PATCH_W / 7;
+  const tileH = PATCH_H / 9;
+  const sampleAreaW = Math.min(cardW, 150);
+  const sampleAreaH = Math.min(cardH, 190);
+  const sourceX = pixelX - sampleAreaW / 2;
+  const sourceY = pixelY - sampleAreaH / 2;
+  // White background instead of transparent black.
+  censorCtx.clearRect(0, 0, 7, 9);
+  censorCtx.fillStyle = '#ffffff';
+  censorCtx.fillRect(0, 0, 7, 9);
+  if (cachedLines) {
+    censorCtx.drawImage(cachedLines, -sourceX * 7 / sampleAreaW,
+      -sourceY * 9 / sampleAreaH, cardW * 7 / sampleAreaW, cardH * 9 / sampleAreaH);
+  }
   if (censorPortrait && censorPortrait.complete && censorPortrait.naturalWidth) {
     const cardRect = identityCard.getBoundingClientRect();
     const portraitRect = censorPortrait.getBoundingClientRect();
-    // Lens centre in viewport pixels, including responsive phone scaling.
-    const centreX = cardRect.left + pixelX * cardRect.width / identityCard.clientWidth;
-    const centreY = cardRect.top + pixelY * cardRect.height / identityCard.clientHeight;
-    const portraitCentreX = portraitRect.left + portraitRect.width / 2;
-    const portraitCentreY = portraitRect.top + portraitRect.height / 2;
-    // Move the sampled area with the finger; clamp to the portrait's boundaries.
-    const sx = Math.max(0, Math.min(censorPortrait.naturalWidth - 1,
-      ((centreX - portraitRect.left) / Math.max(1, portraitRect.width)) * censorPortrait.naturalWidth));
-    const sy = Math.max(0, Math.min(censorPortrait.naturalHeight - 1,
-      ((centreY - portraitRect.top) / Math.max(1, portraitRect.height)) * censorPortrait.naturalHeight));
-    const sampleWidth = Math.max(7, censorPortrait.naturalWidth * 0.35);
-    const sampleHeight = Math.max(9, censorPortrait.naturalHeight * 0.35);
-    const srcX = Math.max(0, Math.min(censorPortrait.naturalWidth - sampleWidth, sx - sampleWidth / 2));
-    const srcY = Math.max(0, Math.min(censorPortrait.naturalHeight - sampleHeight, sy - sampleHeight / 2));
+    const px = (portraitRect.left - cardRect.left) * cardW / Math.max(1, cardRect.width);
+    const py = (portraitRect.top - cardRect.top) * cardH / Math.max(1, cardRect.height);
+    const pw = portraitRect.width * cardW / Math.max(1, cardRect.width);
+    const ph = portraitRect.height * cardH / Math.max(1, cardRect.height);
     try {
-      portraitSampleCtx.clearRect(0, 0, 7, 9);
-      portraitSampleCtx.drawImage(censorPortrait, srcX, srcY, sampleWidth, sampleHeight, 0, 0, 7, 9);
-      const rgba = portraitSampleCtx.getImageData(0, 0, 7, 9).data;
-      for (let row = 0; row < SHAPE.length; row++) {
-        for (let col = 0; col < SHAPE[row].length; col++) {
-          if (SHAPE[row][col] !== '1') continue;
-          const idx = (row * 7 + col + 1) * 4;
-          pixelCtx.fillStyle = `rgb(${rgba[idx]},${rgba[idx+1]},${rgba[idx+2]})`;
-          pixelCtx.fillRect((col + 1) * TILE, (row + 1) * TILE, TILE, TILE);
-        }
-      }
-    } catch (_) {
-      // Image is not readable: display a neutral censor without blocking touch.
-      pixelCtx.fillStyle = '#8b9a9c';
-      for (let row = 0; row < SHAPE.length; row++)
-        for (let col = 0; col < SHAPE[row].length; col++)
-          if (SHAPE[row][col] === '1')
-            pixelCtx.fillRect((col + 1) * TILE, (row + 1) * TILE, TILE, TILE);
-    }
+      // Alpha compositing preserves the security lines behind transparent portrait pixels.
+      censorCtx.drawImage(censorPortrait, (px-sourceX)*7/sampleAreaW,
+        (py-sourceY)*9/sampleAreaH, pw*7/sampleAreaW, ph*9/sampleAreaH);
+    } catch (_) {}
   }
+  try {
+    const rgba = censorCtx.getImageData(0,0,7,9).data;
+    pixelCtx.globalAlpha = lensOpacity;
+    for (let row=0;row<SHAPE.length;row++) {
+      for (let col=0;col<SHAPE[row].length;col++) {
+        if (SHAPE[row][col] !== '1') continue;
+        const x = Math.min(6, col+1), y = Math.min(8,row+1);
+        const k = (y*7+x)*4;
+        pixelCtx.fillStyle = `rgb(${rgba[k]},${rgba[k+1]},${rgba[k+2]})`;
+        pixelCtx.fillRect((col+1)*TILE,(row+1)*TILE,TILE,TILE);
+      }
+    }
+  } catch (_) {}
   pixelCtx.globalAlpha = 1;
   pixelPatch.classList.add('visible');
 }
@@ -1740,7 +1765,7 @@ const qrFrames = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEsAAABLCAIAAAC
 let qrFrameIndex = 0;
 const qrImage = document.createElement('img');
 qrImage.alt = 'Demo QR code – not valid identification';
-qrImage.style.cssText = 'display:block;width:160px;height:160px;object-fit:fill;image-rendering:pixelated';
+qrImage.style.cssText = 'display:block;width:100%;height:100%;object-fit:contain;image-rendering:pixelated';
 qrContainer.replaceChildren(qrImage);
 function showQrFrame() {
   qrImage.src = qrFrames[qrFrameIndex++ % qrFrames.length];
