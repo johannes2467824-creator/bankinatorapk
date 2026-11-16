@@ -1181,6 +1181,31 @@ button, input, select { -webkit-tap-highlight-color: transparent; }
 /* Small even white QR border, preserving the complete square code. */
 #qrGenerator { width:160px !important; height:160px !important; padding:16px !important; box-sizing:border-box !important; overflow:hidden !important; background:#fff !important; }
 #qrGenerator img { display:block !important; width:100% !important; height:100% !important; max-width:100% !important; max-height:100% !important; object-fit:contain !important; image-rendering:pixelated !important; }
+
+/* Galaxy S23: preserve the exact 390 x 844 reference composition.
+   Scale the whole screen, not individual components. */
+@media (max-width: 600px) {
+  html, body, .preview-stage { width: 100%; height: 100%; height: 100dvh; overflow: hidden; }
+  .preview-stage { position: fixed; inset: 0; display: block; }
+  .phone {
+    position: absolute !important;
+    left: 50% !important;
+    top: 50% !important;
+    width: 390px !important;
+    height: 844px !important;
+    min-height: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    transform: translate(-50%, -50%) scale(var(--phone-scale)) !important;
+    transform-origin: center center !important;
+  }
+  .phone-screen { width: 100%; height: 100%; border-radius: 0; }
+  .id-layout { padding-top: 26px !important; }
+  .identity { height: 650px !important; }
+  .qr-wrap { transform: translateY(-25px) !important; }
+  .home { padding-bottom: 130px !important; }
+}
 </style>
 </head>
 <body>
@@ -1206,19 +1231,19 @@ button, input, select { -webkit-tap-highlight-color: transparent; }
 
 function fitPhoneToScreen() {
   const phone = document.getElementById('phone');
+  const viewport = window.visualViewport;
+  const width = viewport ? viewport.width : window.innerWidth;
+  const height = viewport ? viewport.height : window.innerHeight;
 
   if (window.innerWidth <= 600) {
-    phone.style.setProperty('--phone-scale', 1);
+    // Keep every element at its original design coordinates.
+    const scale = Math.min(width / 390, height / 844);
+    phone.style.setProperty('--phone-scale', Math.max(0.1, scale));
     return;
   }
 
-  const scale = Math.min(
-    (window.innerWidth - 50) / 390,
-    (window.innerHeight - 50) / 844,
-    1
-  );
-
-  phone.style.setProperty('--phone-scale', Math.max(.1, scale));
+  const scale = Math.min((width - 50) / 390, (height - 50) / 844, 1);
+  phone.style.setProperty('--phone-scale', Math.max(0.1, scale));
 }
 
 window.addEventListener('resize', fitPhoneToScreen);
