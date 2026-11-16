@@ -1174,6 +1174,10 @@ button, input, select { -webkit-tap-highlight-color: transparent; }
   .home { padding-bottom: 70px; }
 }
 
+
+/* Samsung QR: show the entire PNG within the white frame, without cropping. */
+#qrGenerator { overflow: visible !important; display: flex !important; align-items: center !important; justify-content: center !important; }
+#qrGenerator img { width: 130px !important; height: 130px !important; max-width: 100% !important; max-height: 100% !important; object-fit: contain !important; flex-shrink: 0 !important; }
 </style>
 </head>
 <body>
@@ -1406,17 +1410,32 @@ function positionPixelPatch() {
   pixelPatch.style.top = pixelY + 'px';
 }
 
+// Predefined colours matching the ID card and animated security lines.
+// No screen capture or GPU readback, keeping touch response fast on Samsung.
+const censorPalette = [
+  [229, 164, 206], // pink
+  [164, 215, 225], // light cyan
+  [180, 181, 223], // lavender
+  [182, 212, 208], // mint
+  [232, 238, 239], // pale white
+  [39, 74, 82],    // deep blue-green
+  [115, 159, 169], // muted teal
+  [207, 192, 207]  // dusty pink
+];
 function drawPixelation() {
   pixelCtx.clearRect(0, 0, PATCH_W, PATCH_H);
   pixelCtx.globalAlpha = lensOpacity;
+  const seedX = Math.floor(pixelX / 23);
+  const seedY = Math.floor(pixelY / 23);
   for (let row = 0; row < SHAPE.length; row++) {
     for (let col = 0; col < SHAPE[row].length; col++) {
       if (SHAPE[row][col] !== '1') continue;
       const dx = (col + 1) * TILE;
       const dy = (row + 1) * TILE;
-      // Lightweight opaque mosaic; no getImageData or html2canvas.
-      const shade = ((row * 17 + col * 29) % 5) * 16 + 125;
-      pixelCtx.fillStyle = `rgb(${shade},${shade + 5},${shade + 8})`;
+      const hash = Math.abs((row + seedY) * 17 + (col + seedX) * 29 + row * col * 7);
+      const base = censorPalette[hash % censorPalette.length];
+      const shift = ((hash >> 2) % 5 - 2) * 7;
+      pixelCtx.fillStyle = `rgb(${Math.max(0, Math.min(255, base[0]+shift))},${Math.max(0, Math.min(255, base[1]+shift))},${Math.max(0, Math.min(255, base[2]+shift))})`;
       pixelCtx.fillRect(dx, dy, TILE, TILE);
     }
   }
@@ -1697,7 +1716,7 @@ const qrFrames = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAAB
 let qrFrameIndex = 0;
 const qrImage = document.createElement('img');
 qrImage.alt = 'Demo QR code – not valid identification';
-qrImage.style.cssText = 'display:block;width:150px;height:150px;image-rendering:pixelated';
+qrImage.style.cssText = 'display:block;width:130px;height:130px;max-width:100%;max-height:100%;object-fit:contain;image-rendering:pixelated';
 qrContainer.replaceChildren(qrImage);
 function showQrFrame() {
   qrImage.src = qrFrames[qrFrameIndex++ % qrFrames.length];
