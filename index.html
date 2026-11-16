@@ -379,8 +379,8 @@ text-align: center;
   z-index: 9999;
   left: 0;
   top: 0;
-  width: 140px;
-  height: 140px;
+  width: 196px;
+  height: 252px;
   transform: translate(-50%, -50%);
   pointer-events: none;
   visibility: hidden;
@@ -1191,8 +1191,8 @@ button, input, select { -webkit-tap-highlight-color: transparent; }
 <div class="details"><div class="person-name">FÖRNAMN EFTERNAMN</div><div class="number">123456-7891</div></div></article>
 <div class="qr-wrap"><div class="yellow-box">Skanna med en BankID-app</div><div class="qr-panel"><div class="qr-stack"><div id="qrGenerator"></div><div class="qr-progress"><div id="qrProgressFill"></div></div></div></div><div class="caption">Delas via QR-koden:<br>Foto, namn och personnummer</div></div>
 </div></section><div class="toast" id="toast" role="status"></div></div></div></div>
-<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+
 <script>
 
 /* PHONE SCALING */
@@ -1386,59 +1386,8 @@ const sampleCtx = sampleCanvas.getContext('2d', {
   willReadFrequently: true
 });
 
-async function prepareScreenCapture() {
-  if (screenSnapshot) return screenSnapshot;
-  if (capturePromise) return capturePromise;
-
-  const version = ++captureVersion;
-
-  const task = (async () => {
-    if (typeof html2canvas !== 'function') return null;
-
-    await Promise.all(
-      Array.from(overlay.querySelectorAll('img')).map(img =>
-        img.complete
-          ? Promise.resolve()
-          : new Promise(resolve => {
-              img.addEventListener('load', resolve, { once: true });
-              img.addEventListener('error', resolve, { once: true });
-            })
-      )
-    );
-
-    await new Promise(resolve => requestAnimationFrame(resolve));
-
-    const image = await html2canvas(identityCard, {
-      backgroundColor: '#ffffff',
-      scale: 1,
-      useCORS: true,
-      logging: false,
-      onclone: doc => {
-        const patch = doc.getElementById('pixelPatch');
-        if (patch) patch.style.visibility = 'hidden';
-      }
-    });
-
-    if (version !== captureVersion) return null;
-
-    screenSnapshot = image;
-
-    if (pixelActive) requestPixelDraw();
-
-    return image;
-  })();
-
-  capturePromise = task;
-
-  try {
-    return await task;
-  } catch (error) {
-    console.error('Card capture failed:', error);
-    return null;
-  } finally {
-    if (capturePromise === task) capturePromise = null;
-  }
-}
+// Samsung performance: no DOM screenshot or readback on touch.
+function prepareScreenCapture() { return Promise.resolve(null); }
 
 function getPhonePosition(clientX, clientY) {
   const rect = identityCard.getBoundingClientRect();
@@ -1458,69 +1407,19 @@ function positionPixelPatch() {
 }
 
 function drawPixelation() {
-  if (!screenSnapshot) return;
-
   pixelCtx.clearRect(0, 0, PATCH_W, PATCH_H);
-
-  const scaleX =
-    screenSnapshot.width / identityCard.clientWidth;
-
-  const scaleY =
-    screenSnapshot.height / identityCard.clientHeight;
-
-  const originX = pixelX - PATCH_W / 2;
-  const originY = pixelY - PATCH_H / 2;
-
   pixelCtx.globalAlpha = lensOpacity;
-  pixelCtx.imageSmoothingEnabled = true;
-
   for (let row = 0; row < SHAPE.length; row++) {
     for (let col = 0; col < SHAPE[row].length; col++) {
       if (SHAPE[row][col] !== '1') continue;
-
       const dx = (col + 1) * TILE;
       const dy = (row + 1) * TILE;
-
-      const sx = originX + dx;
-      const sy = originY + dy;
-
-      const x0 = Math.max(0, sx);
-      const y0 = Math.max(0, sy);
-
-      const x1 = Math.min(
-        identityCard.clientWidth,
-        sx + TILE
-      );
-
-      const y1 = Math.min(
-        identityCard.clientHeight,
-        sy + TILE
-      );
-
-      sampleCtx.clearRect(0, 0, 1, 1);
-
-      if (x1 > x0 && y1 > y0) {
-        sampleCtx.drawImage(
-          screenSnapshot,
-          x0 * scaleX,
-          y0 * scaleY,
-          (x1 - x0) * scaleX,
-          (y1 - y0) * scaleY,
-          0, 0, 1, 1
-        );
-
-        const rgba = sampleCtx.getImageData(0, 0, 1, 1).data;
-
-        pixelCtx.fillStyle =
-          `rgb(${rgba[0]},${rgba[1]},${rgba[2]})`;
-      } else {
-        pixelCtx.fillStyle = '#ffffff';
-      }
-
+      // Lightweight opaque mosaic; no getImageData or html2canvas.
+      const shade = ((row * 17 + col * 29) % 5) * 16 + 125;
+      pixelCtx.fillStyle = `rgb(${shade},${shade + 5},${shade + 8})`;
       pixelCtx.fillRect(dx, dy, TILE, TILE);
     }
   }
-
   pixelCtx.globalAlpha = 1;
   pixelPatch.classList.add('visible');
 }
@@ -1533,7 +1432,7 @@ function requestPixelDraw() {
   requestAnimationFrame(() => {
     drawPending = false;
 
-    if (!pixelActive || !screenSnapshot) return;
+    if (!pixelActive) return;
 
     positionPixelPatch();
     drawPixelation();
@@ -1594,8 +1493,7 @@ overlay.addEventListener('pointerdown', event => {
     overlay.setPointerCapture(event.pointerId);
   } catch (_) {}
 
-  if (screenSnapshot) requestPixelDraw();
-  else prepareScreenCapture();
+  requestPixelDraw();
 });
 
 overlay.addEventListener('pointermove', event => {
@@ -1631,7 +1529,7 @@ function releasePixelation() {
 
     lensOpacity = Math.pow(1 - t, 2);
 
-    if (screenSnapshot) drawPixelation();
+    drawPixelation();
 
     if (t < 1) {
       restoreFrame = requestAnimationFrame(frame);
@@ -1794,32 +1692,19 @@ window.addEventListener('blur', () => {
 
 const qrContainer = document.getElementById('qrGenerator');
 
-function generateRandomCode() {
-  const bytes = new Uint8Array(8);
-  crypto.getRandomValues(bytes);
-
-  const randomCode = Array.from(bytes, byte =>
-    byte.toString(16).padStart(2, '0')
-  ).join('').toUpperCase();
-
-  return (
-    'https://youtube.com' +
-    randomCode
-  );
+// QR frames are embedded: work on Android even without a CDN connection.
+const qrFrames = ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAABZs+TBAAABIklEQVR4nK2TsU6EQBCG/2VIsAISWxTMFb7CmZjslT4OaGMl8AS+ge9xJRV2l9hZXAI5GyvBCpJdxuJirGaTS5xmtpj88+98M4rxG+zhL059wwBJDpMDT3J9yZROVLNxaI5n9mvTV03m7EsPbeLy4x/T6m3n8h9NtpptpTtHTa2AHVj58t+Zmas1M/Mi6th7+CH6cnNRyZ7DeX+1IG4S13yi1dCoISCHTrTNLofUm3uxxqM40MUNQi338sGP+/PPa7y+vzi4axp0F2ojcgePU1dMpmgP4nxgsKYFHSDr+MSw1KK8czC1SmWYb7/nD8eulpwOQVK25PCTB+k4JYCD6THRAHlXfQA20k0cNDILRBPVW+JRZgEDJCEOz618X+qfbvkH0vpzKM7mT2gAAAAASUVORK5CYII=","data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAABZs+TBAAABEklEQVR4nK1TO04DMRB9jiOZhoQ20kqOlBOkYyvTcZ3sBbDTUS1cZztT+RpGG4mSNdWuZDNUiGqMkJjKxdO831gQvodW+Jm/vpEB7ZScgAceb6n0iIJyZWe6kqPfuZd9nff5+OZ+0Vbe79oaBtmSTkEmyhXNZ1Ecdlas+T1ERJMZieiT5+qCJso2jDyGiGLnow18hiAH7Qy2Xla4NrdEXqfQ8L7khD1M6Y+Xiq8URmc0eT4f5M7rNGc7x4rmHqMzEeDzWZU0t/TYQL06XrNTMbWwQ6X3IsTBqfWHaiq3YQliwGY5sFzIJ9WcDKD4vlYA5A3k2ddvtTwNy7QsvC9sZ2nvL9e20kUGmi5EgO9U/NNf/gKNJ4RQu/3fVQAAAABJRU5ErkJggg==","data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAABZs+TBAAABHUlEQVR4nK2TPWrEMBCFnyyD0sTe1iBiQy7hYsHpNtfIDewL+KdLtTlPOi0YnGMIdvvsbgjYIHlShVSjEMhUKoZ535unEYTvogg/9dc3HKBblZ+Blu/vCB+voyAXmHm5kXfI+kMR1PXvO9n/wiY3SxHmT2dcqxMqG+gZhL88Z52Iee9E5BJIIlr5/dSl3JdoZsvuBy5Rx3NloXJ+DvVKN5NujAvsuZnH20ZucOJ9+f1hKybbqkCmtCqH8rhWvBZoIKSTrnFkmSPvHyyWMTW+D2gBSeXC3olcamw3aZYn9jH0Zfd5XUK5dwRhkCjJ87ha5T0sFJ9XBMAP5n7FNnAXtdIAvRjJ+oqRzgXh9PSYsTwRBuE3bwUU/1fFP93yF2fReHixTlOrAAAAAElFTkSuQmCC","data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAABZs+TBAAABIElEQVR4nK2TwUrEMBCG/zSFrAdbPG+hBX0BjwUhePI99glcT5427Qt0fZ291VN9CSHSBY9uCkIKSceTeEpEcE45/Mw3+f8ZRvguSvBTf33DAUXelydgF9Yr4urxyMhFepqVf3jxzXMV5fJG6l9nY30V1+TWf9RlI3VE0zKwvVcsDf+diGjBSERL2J8t8X3vdrII+pPivNbrs8+nqYiwWovc8kWUQVbqFzGub32CtybMovp9c7iarl8jrE6MxvJO6ODMcJkoO6kz6cIaMpZa67bDGPEH4As0EO6TcKL5YoAaIpl6xqrNfDPNx0iminh+h0xcBv1JYFZgBm0d21UAGfgJ4V2FuxcFpEbEwwS55e2hNCaSuwMKQKshfF/sn275C9UZeELbdwNqAAAAAElFTkSuQmCC","data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAABZs+TBAAABHUlEQVR4nK1TMWrDQBCcywrOTU5uAxdsyAvSRWCQO+cF+UA+oBjS6qQPxO9JJ4NB6fwFEekBuVQynLypQqrbEMhWWyyzszOzivFdfIGf+muPANgSXQGU8XnHVDcrxUHA9LNpiwH7ZXQmAUDppjfHX7gVd1klcnZs1Uieg8C5ViiOV04lcRxm5l3DzHyO4kxbJH49ufV1Fd91mYW0pfle4MyeFy9AqRfRXQjp2J81VZIX9K6z+a01uRU03KnDYzPg7SBoqBqUeWfyuIZgHpnH8NT2AmfkFuiAOE5CjOn5Ae5e8H1SamlOq8/TINzlmNINjL4RvPAzKI86k7IKAKAPxLOKUGhr8g66EzKWjlS/Uu3jXiAAFmDfxj1V//TLXwZjcD3xjeiJAAAAAElFTkSuQmCC","data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAABZs+TBAAABIElEQVR4nK2TMWrDQBBF/2oX5EoyuN0gnSCQToVB6Zxz+ARRIK0lXcA5T7oIDEqnEwgEFqQKrFJJsOtJFVLNhoCn2uLx5zP/ryD8DAX4nf++YQFdUmKAA8+XJIP3vibr0ZxW7riMaFLvXlns/vZWvm39TDy7pzsgHzxMLYAOJBTPSKLzejnFRBXHKPd8VJ/rge77veeGmRWtjaDZG4KmVkfQhzC58IzJh4I0fFm45DXFMka55jOlSzaIWUfhwOootzE3tDvdZj4dk9titkV75j3buE0qDIDld0mDftOifPBk6oRI98v2axk9XS0pMaEuW+nx8xgm06wBYpkAACJIA76rCoAruqYKG74biOf0ZVHx5OkYauHi1UfQ8Yy40l/+BvgGdUx0eQyRAAAAAElFTkSuQmCC","data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAABZs+TBAAABF0lEQVR4nK2TMW7DMAxFvyID9mT3AErlY2Qo4G6+jt0DRM7WpfCVbCCAs/UKQpuhW+NkkQHJ7FR0EosC5aThg3z6nxSE76INfuqvb3hAtZNtgH1cb0jeA4I803POwtsCjCU7V26N7H5juz2XPH/hQmhDV1lGcxC49YpEEv87EdFl5w3RGu0TnpAUw5ket11UI18y29f6buR8zis9D3pNdXQWfF75JgWYLOCF0+RUXql4XvKztlcAp2Pcn6CHpK+P2CnGn3mwhfPt9M4wA3KFBTzDQ7TICWZiMg1ClPvl4bqcGQ8N6TVVZpIMT5Pq2SmAyRQAcsgL4ruaAAiiGrt0jOaeoHAlLR/FHN+xDQ4iiEzhNa4R/3TLX1GcdIOlUujUAAAAAElFTkSuQmCC","data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAABZs+TBAAABI0lEQVR4nK2TsUrEQBRF72RGxmoDdguRDeQLtltBCKn8neAHmAk2qSL+gH5HKrOwYD4jZgPpRNOYQJ5jJVvNA8FXTXG593DfG2HxO9bDaf76xgJsPnSQAndufWbpYRpyuzCen+fSw2z2IZ9rrwbD8CgAlL+E7yy/P8kyBuKW0eSCumadCeXOkhawyeHZMh3SbRPeFwGansl6wgFzD1warmf4r4Ffy2+njyx37biVnV47fRR1OqKkX20ZHpnXC0CmYfZFplGP1YKd2we21Esat4B1M9Ox0psigH5zM8sS88W4ZAmzUxIiMlqNOmB6zixEhdUcMT2nOkhjQB/dzABkCZnX7ltVAEh+qbN4dmZ58CeZ3QyUcbeRC7IFmf21UyP+6S//AIu6cJv4sot6AAAAAElFTkSuQmCC","data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAABZs+TBAAABG0lEQVR4nK2TsWrDMBCGf0UGdZLpWFBJIC/RQMHd8iB9ATsPYMdbp9DX6ZZOGgN9AoGz10oXBc6+TqWTDgq9ScPPf//dd1KMn+IFfuuvbxDgWjOMQJvXd6xvo1NMgme8mXZQ+/eV2Fd/bknKUwBA+bL+OEn5yzSVmzOqIGh6hWd/16kiPzszc38cmHnO+kw7FBZT93S/z/vMZuiZLFx2hyAY1xzRmmW2F6hLw2wcRBaX00ZHfaicMNfBDDE5a4KQRyU9VsFWlNdwZGoSNX4QMiuPFgHI+yz0/EBfHp0XmE5Krez18XI9C0w71moLa9Z5FlSbJScHCEwB4BV6RP5WQbVxqEIt7HCBMun+TfdRYEGAswiNzzNV//SXvwEXu3bRfShKdQAAAABJRU5ErkJggg==","data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAABZs+TBAAABIUlEQVR4nK1TMU7DQBCcyxldKl8ecJEt5QXpDgkpZf6RFzgfiO2OBn4Ab8GVy9QUSEamx3aDT9xlqRDVHkJiqy1Gu7Mzs4LwXbTAT/21hweMJhTAiceXJN9FX5OPzByXYWXXVZOzmASArK2dzr9wO1hRRfnrOVQO2HURTC2AsyGRsBhBAOAUIhrCH0kOtjvtDKtPgoe20y1WjYnonCpTzvKisgvP+WD7hQoL91qxu2R2m3xeI92+RO6aVHL1sUzd8yO7K2i9udt3sBHORE80zv7Y9ixneD3Le3SA5/MjB+XGFmUb8TQIkU/uZnJvEU9LknqPVG1YfeALlY2zASiiMwBADohnNay3TaUa3gvoOR9dIkY+Y/CAKUDU8v8l/umXvwBY0G3s0f2DuwAAAABJRU5ErkJggg==","data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAABZs+TBAAABHUlEQVR4nK2TMWrDMBiFn/IbnKVOVoNdG3yCbi4U1C3XiX2A2Nk6tfQCvYc3Bwr2MYwT6FpnskDy36l0kkqh/6Th473360mC8T28ws/89QwNJEs+7IGDna/YrPzkyNqhOa3pE3F9St2+b+r9t2xm7B/czGamhD9qOTiYozBjH1bCs+/OzFzLMzMvVh1T9ql4Cuv+4vC6eRz4/gLEtZWhLdK9lFtFVgY6kEMx09RFji6upyzehc939jxg7nQgiVtt1zElvKJRde7Yi25zzTtM68SReQ/iTsMfrF5gZn2Arlo7szJCZKXvXf3Icc8V47VBoDJXHj+CBPyzvVMAtIBeWvdbNdSoUSl7p9jMVO0orhxdaCAqOl5g71T801/+Al2xeAW28O6gAAAAAElFTkSuQmCC","data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAABZs+TBAAABJUlEQVR4nKVTMU7DQBCc81m6NMQyHZItW8oL6OgMVXhH+IBNRRU7osb+Af9IhSMhxc8wJD12Klu689KAqPYQYqsrRjOzM3uC8D3k4Gf++oYGIhpkB6x5fE4mW2pB2sLZz6Rfh8UutuvOx9ffvJmPWWzHeIOUFBVJa8FshOkakwuX352IqFRtTjSxPOa+iVdXQHNkeVwZZjv/BUDIZgiaVNQlsqolqwXqa9oMUb8PLF1UD+Gk3spL3o8D4CCuZdHwfUFnFPWDzofW4rlMWiQ6BZ8PdAp4ew3F8wgCzPlJP97Ez3zOQiw65Z5UYNkrJ4gt5uOisPhRQZoA6sB3CkAWkFVtv1Xjb8f3cWS1HHiDfFoez3K+C6FdBHe3FzGClS2fr/nXX/4E+l13PHpQzlkAAAAASUVORK5CYII=","data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAABZs+TBAAABGElEQVR4nK1TPUrEQBT+shMYq02x7WgWPIFdBGFKrxMv4Mx0Vlm90WyVci/gQjAeIFkRZmEmz0LE6g0IvuoVH9/7fngF4Wdohd/5644IKBPqCXjk8YZwkkdHMcM5X4juvMV+y2JKAKk6v64PeW3i7ebWZvVXATgIq4cMxhXJ+WSKkvdORLHygogWPp+2EbuAhzCw+SCiGYlGK+scj0arxexjJueXJ7ra4xnvvC/RNZdWHxeZ6ZTmMNqGFs3fAlnUrlctRlZzmSiUGz1sfLI8zwJAR+S8f+c8mF6xespUQtH95+mc690QPjzWUvB6YivrDgMk39cKQHL+esJd5i9aqQDaeZHp1FDtaJwa3hcioKpeTJkuin/65S9+FoM6kloqWAAAAABJRU5ErkJggg==","data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAABZs+TBAAABGklEQVR4nK1TPUrEQBT+ZiYya5NsYyGMTMBLrBAYOz1OcoH8dFa7eJztXBBS7gmELPEAiTZZTPJsVqzeLIKvesXH+/5mBOFnSOJ3/rpjBExW2w7IeUxBdnYmo5HFSPSLqdq+Yhd7eVX0cF7b51Pi11yQCVeq9+g5+TKpzxcRUbciIpr5OxmpEmPuDO9d3dw3gtRy59MckS1hcm15Lqpe2lnb0qNZIkTy3CN0hueizrU02LVufPk427kmdJ4MiYa2GhpRt6xmOS33CS1Ad9clhwlUh7eLGsWjp/dJiBjH5OP4zmICFGU8XV6F+vaL95VquxkMwHd62tUM/q1iTLWBa+DJUCIa1GZr+57vQqIS02FxWO8DFiP+6S9/A+sAd7AtnMkRAAAAAElFTkSuQmCC","data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAABZs+TBAAABJUlEQVR4nK2TsUrEQBRF7+wEntUuaDsQwZ+IEghWKa38An8ga2W1SfADFj/HbraKnV8gjGR7swFhAzN5VmL1BhZ81RSXmXvunacYv8ML/M2pZ3jAINMDsJH1NWNDHy37yJ2HM73Y5dhdipoEQGi7bHyX/SQAdLjZ39/F/K+OUFvdFC6iaVV4RKhVIr+lGeG82684kmFYX1MDM06fjZzhkvqmcKB0FjU8F3oms7ZezBm+Il8foayLdPHySqrsZ4rko4diGibwk5F759bqQ2cq9KLnJHyV0/Otu7BBZueZdFP4ODuzX1lXd0bkSkICw+X3OMV6rxkPFkvSkS4qShs4UCxDIGzt1YA8shcVGYC3Vstcvua0ZYdM5lqgVWF+y0HyX1X/tMs/cjR8Bma/RC0AAAAASUVORK5CYII=","data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAABZs+TBAAABKElEQVR4nKVTMU7DQBCcyxldmtihtOQolvICuqSKqPKPvCDhAdxFNDQoP+AfrgiV3fECJIPd0MVOY0t3WRoiqlsJMdUVo7mZnV1BuIAG+MVf37DAlA7YAPd+viZnlNyRZTSboRzPY/OaejkBAJCowjfemzvOU95/1Mmxis2yZDg74apHkAj82YmI9lRqorNXx90V6bpIUNSMzr6zoqso52bYFsEoWox7afx/OW1PGdYq9nPkdTZ70nV44/czAFTZYmoKpi/3iUmTvZs5oyOjRT5ZoRlOvX5gtzm2uYUqvdkFAS6AfbhNn/1+hJidVdCqhMmlCacMYT9j/GxUEi4BVfk7BSAN5P7A76rbfQVXL72/C0Sd/FjVI83shgUSndMRCTufH/zrlr8Bgtt0novjxSIAAAAASUVORK5CYII=","data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAABZs+TBAAABHElEQVR4nK2TMU/DMBCFn3GQWVqzIhlaKRsbG0hIYevfSWCvw9ap8HcykUpIycZfMJQZEiZXcnIMCDH5EBI3eTjd9969syB8F+3hp/76RgBm5KkDlvF+S4NeJIICM7M/kC/tUbmZ/8I9e+T0JACGk9P07YnTr73sFJA51pcpGpMzvkBE1GXOEo1R1nDdzvXKoH2Ns2hU2/Hc2YZjjZClgq5llIVQ1NsOsm8MM6dvZrckyXN5TYrN+5VBG88LofCy98F6x7DWcHkWcnD76f2lWOFePZfRHlkqRxewFZPpIER6qJIPZZjcLUFXmO7SKAshVybPALWNawYg15B3dfxWEwDDTZXsP+zivqC9PF5gYpnb+LpDN0U8U/FPf/kTmf14DzPnnC0AAAAASUVORK5CYII=","data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAABZs+TBAAABI0lEQVR4nK1TMWrDQBCc8ykolZSUIRfsL7iTwaDS70heIHVu4tO9QOQD+UpkCEidXiAQtsGt5EqBO2+qkGoPAtnqimFmduZWEH6GZvidv75hARWlyIAdj9Gk8vo4kmUxM4y3eF+6Yr/w6spDu/b5CQC4ODkXrc9/PMmyUkh7D8YId2idFgG/OxGRqSURXVkep4UYlu6uEQXPM1Z9lCokPA/IkCxCpWuPFl5X3YATrTx9kSFpJkSpYrsI3BUWjb2pTo98p/E0Lwm7sPd0+tJ8XvbyfvJ1Spsnt+lyobw5W6S9rqUnZyEWsVlfvjo25xk04XnbRyHvBzYLVZZY4MhqBQDw9oGsefBoAVJvz6b0/B+raT7A5hO/FyygABvX/H2Jf7rlbwajf5qT3NObAAAAAElFTkSuQmCC","data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAABZs+TBAAABF0lEQVR4nK1TMWrDQBCc0wlOTU5+wAkZ8gkJDEpn/yMfEH5ATsK1yXvSyWCwu3zhgtwnSiWBTpsqpLoNgWy1xTCzuzMrCN9FEX7qrz1mwNRF/gE8hfGW5EqdBc0M55D4ZfLNac3qykaZX2c7dDGPSUd/LIHKMZhW4PHZkIjDuxMRNQUR0RLk8XvEafdmH7ImhImBq7tLx9XJMFoLoIt8UXlQC0QXIjLgvPD7KbPlTVeslurb0WjlGB7ZZe/bMwqOhzpnRycufXjmGYXRcMAc1IolwR92sDvGUy/EGtPmc7oxnlqS6RZa3Qe9iDAkEAPakssqAEAuCGcVc62MrlzN3RDpKPsX2Q7hG0Zohc8S37yGcyj+6Ze/ABa4b2hfsEjCAAAAAElFTkSuQmCC","data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAABZs+TBAAABF0lEQVR4nK1TO07EMBB9XkfKVs4FvEokLhEkJNOFE3AOgkSbzwXY89BtqpTb0a3kXXKAmCqR7B0qROVBSEw1xdPMm/feCMJ30QY/9dceHtD1wT4BTRzfktxVWpBnZrptuKwThoLdK3PKu9+4ufsdj8mW4N5kZyyD6QVwDK1I4rcTEXUlEdE1rk9NcoZtjI7qAy/ItqNXYDD0anJa0KR5dFcSLjjVx3yznrsoRvbvxVROypyYu+bStotWqeU4HwBjlfEM5xnUL1aMH4w+qtSABeJzEukQXh7RPjCeBiEKtd59rhPjaUtSVFDpTVSfDdwWmUN/y2UVACCv4LMaztXwnA5xL5AtxX5NhGMy5gHdgGiM/5f4p1/+AqKzdx+b/flvAAAAAElFTkSuQmCC","data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAABZs+TBAAABHklEQVR4nK2TMW6DQBBF/7JI6yaQlEhWQPIlKCLBVZILxJabVCz4AuQEnMVIlvAxiOgj4zQgDZlUUarZKFKm2mL1//w3M4rxXezhp/76BgHxJdUXoJD/W17ieq6YHJrjCo+5KdvE7dsgKn/pTe/Hk6tnH+GU8Eq/B/1B1qnUMnaRVb6cnZkpSMkyf4o6S4nko9t4s6zj4dCebnJwLvMBFSmQcc2D7KXvairgs3IwXEqY23mNLCplr3AaquMaRvYCFVnMk+bONXdV9dczXlPXvMYXvzHLTjl2jJlpx73tXJyV2ty3D9f5TczlwTKeLQIj8wFtTVxmBGhH9q2JxyMVKTmyA2hSs+9kLx/hlDyde8yDeIMgYB1gqB2c1T/d8hdnyXjM3O5kFgAAAABJRU5ErkJggg==","data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAABZs+TBAAABKElEQVR4nK2Tv0rEQBDGv80G1sbkxEZh4Q58iRQH0WfxBRKrq26TF/BPY2fng6xwkOvuCcTApdccCAnu3lgdVrMiONUWw7ff95sZQTgURfipv77hAJ3kugCWfL8hXFsIcgHN/kgaAbzMgv/6iVr95k32/Tzckw5INrLK20BPLfwNvBExn52IXAFJRHueT5HJfYZyaFk+MRL1WjfdU3r2xuuUg04USusCnO83K4zTCTrWc4zjS/d19azXAT5ya8dq9GahA9lrC9HoAls2e+zfTfswtqfWV7zOR6aRO6gpz5CIXGlb02ieoY+hu8fP3RiauyGkFomSvB9XqOktWih+XhEAX9uLPeaBuyiUXoLurGRzRUgHeUKgxTnrJ0ItfLWe7RS/q+KfbvkbwO54EpKl1/AAAAAASUVORK5CYII=","data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAABZs+TBAAABJElEQVR4nK2TsWrDMBCGf1kGZak9G0RdyBN0SyZ1y+vYpUOnyia78zzenEnd8gQBU3fpFqdLDHKvQymdTlDITRo+7u7//5Mg/BZF+Kv/vuGBvCZdAC88Y0mnbhjJs0yEcSHL53W1v2NnxQAganM+hHebTz8oz6QX2aisMn2AqcX8CJCIee1ERI0ZiOiL1166fKTeuiHAwAzNaiAX8JBqko2Ru06yfSLcPBzHNntTWcV7KDqRdEju3wPai/1QAXj1fBbz0+H4+RFvV4E+8nZydoNxkbP7wJedLp2H6vnbkI3paQ3bBjKdhVg2Kj4rHdBlCdsWybQM7FMoDQMoPq8IgKwg646/1QjAXLfTaZrYWRHSi7Qb7CzvITygS+cLaNYfcaW//A0mBnepst41+QAAAABJRU5ErkJggg==","data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABXAQAAAABZs+TBAAABG0lEQVR4nK1TMU7EMBCc2JFMFdMiWZeT7hVX+aj4By/IQR8n4gH3A95BuiAhuaC4LxgFiQ4l0CSSzVIhKhsh3VZbjGZ2Z3Yzwk8Rw2/9t4cHygO5CqjjGENK0jCRj2IYpjNudtvmcZ3W/excap4cQAi75/djan4585sjoF1yL7W3KrkXEVGjByL6ivPsbTlZZ+yQwEAPh9kZm9Ka+nLU/NDzKA8LK/FULLgWF01cqxJlS8rMKa1RuFpz6uN5wdcCcvZmdgme1lKjhxFxf/IQtpAP4Vy83McwGQEhh7+7XEcxLGTZphH5h1CJ3A1BdiiWTdIfVWlAxPNiAPgKvO3Ttxpuu2VclqgWg5y5uXqT5vWvO/QFVNTn7ES//A0+94O+Y7hGqAAAAABJRU5ErkJggg=="];
+let qrFrameIndex = 0;
+const qrImage = document.createElement('img');
+qrImage.alt = 'Demo QR code – not valid identification';
+qrImage.style.cssText = 'display:block;width:150px;height:150px;image-rendering:pixelated';
+qrContainer.replaceChildren(qrImage);
+function showQrFrame() {
+  qrImage.src = qrFrames[qrFrameIndex++ % qrFrames.length];
 }
-
-const qrGenerator = new QRCode(qrContainer, {
-  text: generateRandomCode(),
-  width: 150,
-  height: 150,
-  colorDark: '#000000',
-  colorLight: '#ffffff',
-  correctLevel: QRCode.CorrectLevel.M
-});
-
+showQrFrame();
 setInterval(() => {
-  if (document.visibilityState !== 'visible' || !overlay.classList.contains('open')) return;
-  qrGenerator.makeCode(generateRandomCode());
+  if (document.visibilityState === 'visible' && overlay.classList.contains('open')) showQrFrame();
 }, 1000);
 
 
@@ -2877,7 +2762,6 @@ ctx.drawImage(
     close();
 
     overlay.classList.add('open');
-    prepareScreenCapture();
   }
 
   submit.addEventListener('click', accept);
